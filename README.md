@@ -18,10 +18,10 @@ DSH（DeepSeek Harness）系统通知插件：当 agent **完成任务**、**出
 ```bash
 # 1. 安装插件依赖（node-notifier）。dsh plugin add 只链接仓库、不会装它的依赖，
 #    必须先在仓库目录执行一次安装：
-cd /home/haytham/Repos/dsh-notify && pnpm install   # 或 npm install
+cd /home/haytham/Repos/dsh-plugins/dsh-notify && pnpm install   # 或 npm install
 
 # 2. 把本仓库加入 dsh web profile（会在 profile 的 node_modules 里建链接）
-dsh plugin --profile web add "link:/home/haytham/Repos/dsh-notify"
+dsh plugin --profile web add "link:/home/haytham/Repos/dsh-plugins/dsh-notify"
 
 # 3. 在 ~/.dsh/profiles/web/cordis.patch.yml 中追加插入行（profile 的 HMR 会自动热加载）：
 ```
