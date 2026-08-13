@@ -1,7 +1,9 @@
 // dsh-notify — DSH 系统通知插件
 //
-// 在宿主进程内监听 Cordis 事件，把以下时机以操作系统通知的形式推送出来
-// （Linux 用 notify-send，macOS 用 osascript）：
+// 在宿主进程内监听 Cordis 事件，把以下时机以操作系统通知的形式推送出来。
+// 通知发送优先走 node-notifier（跨平台封装：Linux→notify-send、
+// macOS→terminal-notifier、Windows→snoretoast），库不可用时回退到
+// 直接调用系统命令（notify-send / osascript）：
 //
 //   - 任务完成    agent/status 由 running 回到 idle，且最近一轮 turn/end 的
 //                reason 为 completed / max-tokens（只通知根 agent，忽略子 agent）
@@ -12,6 +14,7 @@
 // 安装、配置与排查见仓库 README.md。
 
 import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
 
 /** Cordis 插件名（与组合行的 name 一致）。 */
 const name = "dsh-notify";
@@ -115,8 +118,42 @@ function errorText(reason) {
 // 通知发送
 // ---------------------------------------------------------------------------
 
+// 主路径：node-notifier（跨平台封装，处理了各平台的参数映射、转义与
+// Windows 支持）。从插件自身位置解析，避免依赖宿主进程的模块图。
+// 未安装时置空，走下方回退路径——通知插件不应因缺依赖而拖垮宿主加载。
+let notifier = null;
+try {
+  notifier = createRequire(import.meta.url)("node-notifier");
+} catch (error) {
+  console.warn(`[dsh-notify] node-notifier 未安装（在仓库目录执行 pnpm install 可装），回退到直接调用系统命令: ${error?.message ?? error}`);
+}
+
+/**
+ * 发送一条系统通知。
+ * @param options 合并后的插件配置（appName 等）
+ * @param title 标题
+ * @param body 正文
+ * @param urgency low | normal | critical（macOS 不支持，会被忽略）
+ */
 function sendNotification(options, title, body, urgency) {
   console.log(`[dsh-notify] ${title}: ${body}`);
+
+  // 主路径：node-notifier。
+  // 平台分派由库内部完成：Linux→notify-send（-a appName、-u urgency），
+  // macOS→terminal-notifier，Windows→snoretoast（appName 映射为 appID）。
+  if (notifier !== null) {
+    try {
+      notifier.notify({ title, message: body, urgency, appName: options.appName }, (error) => {
+        if (error) console.error(`[dsh-notify] 通知发送失败: ${error.message ?? error}`);
+      });
+      return;
+    } catch (error) {
+      console.error(`[dsh-notify] 通知发送失败: ${String(error)}`);
+    }
+    return;
+  }
+
+  // 回退路径：直接调用系统命令（仅当 node-notifier 不可用时）。
   try {
     if (process.platform === "linux") {
       execFile("notify-send", ["-a", options.appName, "-u", urgency, title, body], (error) => {
