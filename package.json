@@ -1,0 +1,9 @@
+{
+  "name": "dsh-notify",
+  "version": "0.1.0",
+  "description": "DSH 系统通知插件：任务完成、任务出错、等待用户回答、等待审批时发送操作系统通知。",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "private": true
+}
