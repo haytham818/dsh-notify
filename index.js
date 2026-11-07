@@ -51,10 +51,35 @@ function truncate(text, limit) {
   return oneLine.length <= limit ? oneLine : `${oneLine.slice(0, Math.max(0, limit - 1))}…`;
 }
 
+/**
+ * 把会话日志读成普通数组。
+ *
+ * 为什么需要这一步：DSH 0.2.2-rc.1 的 `Session` 只提供
+ * `eventAt(seq)` / `snapshotEvents()` / `ownEvents()` / `seq`，
+ * **没有 `events` 这个属性**。旧的 `session.events` 读取因此永远是 undefined，
+ * 于是 `lastEvent()` 返回 undefined、`lastTurnReason()` 返回 undefined，
+ * `agent/status` 里的 `if (reason === undefined) return` 会吞掉每一次
+ * 「任务完成 / 任务出错」通知——插件看起来已挂载，却从不发通知。
+ *
+ * 这里优先走新访问器，找不到时回退到旧的数组属性，从而同时兼容新旧版本。
+ */
+function sessionEvents(session) {
+  if (session === undefined || session === null) return [];
+  if (typeof session.snapshotEvents === "function") {
+    try {
+      const events = session.snapshotEvents();
+      if (Array.isArray(events)) return events;
+    } catch {
+      // 访问器存在但不可用（例如会话已释放），退回兼容路径。
+    }
+  }
+  const legacy = session.events;
+  return Array.isArray(legacy) ? legacy : [];
+}
+
 /** 从会话事件日志中自后向前找最后一个指定类型的事件。 */
 function lastEvent(agent, type) {
-  const events = agent?.session?.events;
-  if (!Array.isArray(events)) return undefined;
+  const events = sessionEvents(agent?.session);
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event !== null && typeof event === "object" && event.type === type) return event;
@@ -237,6 +262,13 @@ function apply(ctx, config) {
   });
 
   // 3) 等待审批：工具派发被审批环节挂起。
+  //
+  // 必须以 `{ prepend: true }` 注册。`@deepseek-ai/dsh-api-remotes` 为了把请求
+  // 转发给浏览器界面，也监听同一个 `approval/request` 瀑布；当请求的 agent 与
+  // 它绑定的作用域载体不一致时，它会抛 `TypeError`，而 Cordis 会把抛错的监听器
+  // 收敛成 fail-closed 的 `unavailable`。后注册的监听器因此**永远收不到**请求。
+  // 提前注册只是让我们先"观察"这次请求，随后仍 `return next()` 交回原有链路，
+  // 所以浏览器里的审批界面不受影响。
   ctx.on("approval/request", (req, next) => {
     try {
       if (options.notifyOnApproval && isRoot(req?.agent)) {
@@ -247,7 +279,7 @@ function apply(ctx, config) {
       console.error(`[dsh-notify] approval/request 处理失败: ${String(error)}`);
     }
     return next();
-  });
+  }, { prepend: true });
 
   // 测试命令：/dsh-notify-test —— 手动验证通知链路。
   if (commands !== undefined) {
